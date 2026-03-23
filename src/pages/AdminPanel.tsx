@@ -803,22 +803,19 @@ const UserRolesTab = () => {
     queryFn: async () => {
       const { data, error } = await supabase.from("user_roles").select("*");
       if (error) throw error;
-      // Try to resolve emails via edge function, but don't fail if it errors
+      // Fetch emails from profiles table
       if (data && data.length > 0) {
-        try {
-          const userIds = data.map(r => r.user_id);
-          const { data: emailData } = await supabase.functions.invoke("get-user-by-email", {
-            body: { user_ids: userIds },
-          });
-          if (Array.isArray(emailData)) {
-            const map: Record<string, string> = {};
-            for (const entry of emailData) {
-              if (entry.user_id && entry.email) map[entry.user_id] = entry.email;
-            }
-            setEmailMap(map);
+        const userIds = data.map(r => r.user_id);
+        const { data: profiles } = await supabase
+          .from("profiles")
+          .select("id, email")
+          .in("id", userIds);
+        if (profiles) {
+          const map: Record<string, string> = {};
+          for (const profile of profiles) {
+            map[profile.id] = profile.email;
           }
-        } catch {
-          // Email lookup failed silently — UIDs still show
+          setEmailMap(map);
         }
       }
       return data;
@@ -842,29 +839,38 @@ const UserRolesTab = () => {
     if (!email.trim()) return;
     setLoading(true);
     try {
-      const trimmedEmail = email.trim().toLowerCase();
+      const input = email.trim();
+      const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-      // Try edge function first
-      let userId: string | null = null;
-      const { data: userData, error: fnError } = await supabase.functions.invoke("get-user-by-email", {
-        body: { email: trimmedEmail },
-      });
+      let userId: string;
+      let userEmail: string;
 
-      if (!fnError && userData?.user_id) {
-        userId = userData.user_id;
+      if (uuidRegex.test(input)) {
+        // Input is UUID — look up email from profiles
+        userId = input;
+        const { data: profile } = await supabase
+          .from("profiles")
+          .select("email")
+          .eq("id", userId)
+          .single();
+        userEmail = profile?.email || userId;
       } else {
-        // Fallback: ask user to enter UID directly
-        throw new Error(
-          userData?.error === "User not found"
-            ? `No account found for "${trimmedEmail}". Make sure the user has signed up first.`
-            : `Could not look up user. Try entering the User ID directly instead of email.`
-        );
+        // Input is email — look up user ID from profiles
+        const { data: profile, error } = await supabase
+          .from("profiles")
+          .select("id, email")
+          .eq("email", input.toLowerCase())
+          .single();
+        if (error || !profile) {
+          throw new Error(`No user found with email "${input}". Make sure they've signed up first.`);
+        }
+        userId = profile.id;
+        userEmail = profile.email;
       }
 
-      // Check if already admin
       const existing = roles.find(r => r.user_id === userId && r.role === "admin");
       if (existing) {
-        toast({ title: "Already an admin", description: `${email} already has admin role.` });
+        toast({ title: "Already an admin" });
         setLoading(false);
         return;
       }
@@ -872,9 +878,9 @@ const UserRolesTab = () => {
       const { error } = await supabase.from("user_roles").insert({ user_id: userId, role: "admin" as const });
       if (error) throw error;
 
-      setEmailMap(prev => ({ ...prev, [userId!]: trimmedEmail }));
+      setEmailMap(prev => ({ ...prev, [userId]: userEmail }));
       queryClient.invalidateQueries({ queryKey: ["user_roles"] });
-      toast({ title: "Admin role granted", description: `${email} is now an admin.` });
+      toast({ title: "Admin role granted" });
       setEmail("");
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : "An unexpected error occurred";
@@ -887,12 +893,12 @@ const UserRolesTab = () => {
     <Card>
       <CardHeader>
         <CardTitle className="text-lg flex items-center gap-2"><Users className="w-5 h-5" /> User Roles</CardTitle>
-        <CardDescription>Grant or revoke admin access by email address</CardDescription>
+        <CardDescription>Grant or revoke admin access by email or User ID (UUID)</CardDescription>
       </CardHeader>
       <CardContent className="space-y-6">
         <div className="flex gap-2">
           <Input
-            placeholder="Enter user email..."
+            placeholder="Enter email or paste User ID (UUID)..."
             value={email}
             onChange={(e) => setEmail(e.target.value)}
             onKeyDown={(e) => e.key === "Enter" && handleGrant()}

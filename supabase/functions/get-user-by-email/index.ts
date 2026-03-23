@@ -19,79 +19,56 @@ Deno.serve(async (req) => {
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
     const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 
-    // Verify caller is authenticated
     const authHeader = req.headers.get("Authorization");
-    if (!authHeader) return json({ error: "Unauthorized" }, 401);
+    if (!authHeader) return json({ error: "No Authorization header" }, 401);
 
-    const anonKey = Deno.env.get("SUPABASE_ANON_KEY")!;
-    const userClient = createClient(supabaseUrl, anonKey, {
-      global: { headers: { Authorization: authHeader } },
-    });
-    const { data: { user: caller } } = await userClient.auth.getUser();
-    if (!caller) return json({ error: "Unauthorized" }, 401);
-
-    // Use service role for all admin operations
+    // Use service role client to verify the caller's JWT
     const admin = createClient(supabaseUrl, serviceRoleKey, {
       auth: { autoRefreshToken: false, persistSession: false },
     });
 
-    // Verify caller is admin
-    const { data: roleRow } = await admin
+    // Get user from the JWT token passed in Authorization header
+    const jwt = authHeader.replace("Bearer ", "");
+    const { data: { user: caller }, error: authError } = await admin.auth.getUser(jwt);
+    if (authError || !caller) return json({ error: `Unauthorized: ${authError?.message}` }, 401);
+
+    // Check caller is admin
+    const { data: roleRow, error: roleError } = await admin
       .from("user_roles")
       .select("role")
       .eq("user_id", caller.id)
       .eq("role", "admin")
       .maybeSingle();
 
-    if (!roleRow) return json({ error: "Forbidden" }, 403);
+    if (roleError) return json({ error: `Role check failed: ${roleError.message}` }, 500);
+    if (!roleRow) return json({ error: "Forbidden: admin only" }, 403);
 
     const body = await req.json();
 
     // Mode 1: lookup by email
     if (typeof body.email === "string") {
       const email = body.email.trim().toLowerCase();
-      
-      // Fetch all users (paginated)
-      let allUsers: { id: string; email?: string }[] = [];
-      let page = 1;
-      while (true) {
-        const { data: { users }, error } = await admin.auth.admin.listUsers({ page, perPage: 1000 });
-        if (error) throw error;
-        allUsers = allUsers.concat(users);
-        if (users.length < 1000) break;
-        page++;
-      }
-
-      const found = allUsers.find((u) => u.email?.toLowerCase() === email);
+      const { data: { users }, error } = await admin.auth.admin.listUsers({ perPage: 1000 });
+      if (error) return json({ error: error.message }, 500);
+      const found = users.find((u) => u.email?.toLowerCase() === email);
       if (!found) return json({ error: "User not found" }, 404);
       return json({ user_id: found.id, email: found.email });
     }
 
-    // Mode 2: lookup by user_ids array
+    // Mode 2: lookup by user_ids
     if (Array.isArray(body.user_ids)) {
-      let allUsers: { id: string; email?: string }[] = [];
-      let page = 1;
-      while (true) {
-        const { data: { users }, error } = await admin.auth.admin.listUsers({ page, perPage: 1000 });
-        if (error) throw error;
-        allUsers = allUsers.concat(users);
-        if (users.length < 1000) break;
-        page++;
-      }
-
-      const userMap = new Map(allUsers.map((u) => [u.id, u.email ?? null]));
-      const result = (body.user_ids as string[]).map((uid) => ({
+      const { data: { users }, error } = await admin.auth.admin.listUsers({ perPage: 1000 });
+      if (error) return json({ error: error.message }, 500);
+      const userMap = new Map(users.map((u) => [u.id, u.email ?? null]));
+      return json((body.user_ids as string[]).map((uid) => ({
         user_id: uid,
         email: userMap.get(uid) ?? null,
-      }));
-      return json(result);
+      })));
     }
 
     return json({ error: "Provide 'email' or 'user_ids'" }, 400);
 
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    console.error("Edge function error:", message);
-    return json({ error: message }, 500);
+    return json({ error: err instanceof Error ? err.message : String(err) }, 500);
   }
 });
