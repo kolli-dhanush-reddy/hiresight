@@ -64,6 +64,8 @@ Each CSV must have the exact column names shown in the sample files. Missing or 
 - placed (integer)
 - total (integer)
 - percentage (integer 0-100)
+- predicted_percentage (integer 0-100, optional)
+- trend (text: rising, stable, declining, optional)
 
 ### prediction_data.csv
 - year (integer)
