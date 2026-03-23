@@ -54,6 +54,18 @@ ALTER TABLE public.department_placements
   ADD COLUMN IF NOT EXISTS trend TEXT DEFAULT 'stable'
     CHECK (trend IN ('rising', 'stable', 'declining'));
 
+-- Update predicted_percentage and trend for recent years
+UPDATE public.department_placements SET predicted_percentage = 92, trend = 'rising' WHERE year = 2024 AND department = 'CSE';
+UPDATE public.department_placements SET predicted_percentage = 90, trend = 'rising' WHERE year = 2024 AND department = 'ECE';
+UPDATE public.department_placements SET predicted_percentage = 87, trend = 'rising' WHERE year = 2024 AND department = 'EEE';
+UPDATE public.department_placements SET predicted_percentage = 80, trend = 'rising' WHERE year = 2024 AND department = 'MECH';
+UPDATE public.department_placements SET predicted_percentage = 74, trend = 'rising' WHERE year = 2024 AND department = 'CIVIL';
+UPDATE public.department_placements SET predicted_percentage = 93, trend = 'rising' WHERE year = 2023 AND department = 'CSE';
+UPDATE public.department_placements SET predicted_percentage = 90, trend = 'rising' WHERE year = 2023 AND department = 'ECE';
+UPDATE public.department_placements SET predicted_percentage = 88, trend = 'rising' WHERE year = 2023 AND department = 'EEE';
+UPDATE public.department_placements SET predicted_percentage = 82, trend = 'rising' WHERE year = 2023 AND department = 'MECH';
+UPDATE public.department_placements SET predicted_percentage = 75, trend = 'rising' WHERE year = 2023 AND department = 'CIVIL';
+
 -- ============================================================
 -- skill_demand: skills required by companies
 -- ============================================================
