@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Supabase Connection Test</title>
+    <style>
+        body {
+            font-family: system-ui, -apple-system, sans-serif;
+            max-width: 800px;
+            margin: 50px auto;
+            padding: 20px;
+            background: #0f172a;
+            color: #e2e8f0;
+        }
+        .status { padding: 15px; margin: 10px 0; border-radius: 8px; }
+        .success { background: #10b981; color: white; }
+        .error { background: #ef4444; color: white; }
+        .warning { background: #f59e0b; color: white; }
+        .info { background: #3b82f6; color: white; }
+        pre { background: #1e293b; padding: 15px; border-radius: 8px; overflow-x: auto; }
+        button { 
+            background: #3b82f6; 
+            color: white; 
+            border: none; 
+            padding: 12px 24px; 
+            border-radius: 8px; 
+            cursor: pointer;
+            font-size: 16px;
+            margin: 10px 5px;
+        }
+        button:hover { background: #2563eb; }
+        h1 { color: #60a5fa; }
+        h2 { color: #93c5fd; margin-top: 30px; }
+    </style>
+</head>
+<body>
+    <h1>🔍 Supabase Connection Diagnostic</h1>
+    
+    <div id="results"></div>
+    
+    <h2>Actions</h2>
+    <button onclick="runTests()">🔄 Run All Tests</button>
+    <button onclick="testAuth()">🔐 Test Authentication</button>
+    <button onclick="testTables()">📊 Test Tables</button>
+
+    <script type="module">
+        import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
+
+        const SUPABASE_URL = 'https://alktoprjxaydocjtpgtf.supabase.co';
+        const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImFsa3RvcHJqeGF5ZG9janRwZ3RmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzMxMDgxMzMsImV4cCI6MjA4ODY4NDEzM30.vzHZX2qc9tppmSNRM8OTPhepYzB0yjBmUT62oA5PB2w';
+
+        const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
+        window.supabase = supabase;
+
+        const results = document.getElementById('results');
+
+        function log(message, type = 'info') {
+            const div = document.createElement('div');
+            div.className = `status ${type}`;
+            div.innerHTML = message;
+            results.appendChild(div);
+        }
+
+        function logJson(data) {
+            const pre = document.createElement('pre');
+            pre.textContent = JSON.stringify(data, null, 2);
+            results.appendChild(pre);
+        }
+
+        async function testConnection() {
+            log('Testing Supabase connection...', 'info');
+            
+            if (!SUPABASE_URL || !SUPABASE_KEY) {
+                log('❌ Missing credentials!', 'error');
+                return false;
+            }
+            
+            log('✅ Credentials found', 'success');
+            log(`URL: ${SUPABASE_URL}`, 'info');
+            return true;
+        }
+
+        async function testAuth() {
+            results.innerHTML = '';
+            log('🔐 Testing Authentication...', 'info');
+            
+            const { data, error } = await supabase.auth.getSession();
+            
+            if (error) {
+                log(`❌ Auth Error: ${error.message}`, 'error');
+                logJson(error);
+            } else if (data.session) {
+                log('✅ User is logged in!', 'success');
+                logJson(data.session.user);
+            } else {
+                log('⚠️ No active session (not logged in)', 'warning');
+                log('This is normal if you haven\'t logged in yet', 'info');
+            }
+        }
+
+        async function testTable(tableName) {
+            log(`Testing table: ${tableName}...`, 'info');
+            
+            const { data, error, count } = await supabase
+                .from(tableName)
+                .select('*', { count: 'exact', head: true });
+            
+            if (error) {
+                log(`❌ ${tableName}: ${error.message}`, 'error');
+                logJson(error);
+                return false;
+            } else {
+                log(`✅ ${tableName}: ${count || 0} rows`, 'success');
+                return true;
+            }
+        }
+
+        async function testTables() {
+            results.innerHTML = '';
+            log('📊 Testing Database Tables...', 'info');
+            
+            const tables = [
+                'year_wise_placement',
+                'salary_data',
+                'top_recruiters',
+                'prediction_data',
+                'company_placements',
+                'department_placements',
+                'company_details',
+                'skill_demand'
+            ];
+            
+            let successCount = 0;
+            for (const table of tables) {
+                const success = await testTable(table);
+                if (success) successCount++;
+            }
+            
+            log(`\n📈 Summary: ${successCount}/${tables.length} tables accessible`, 
+                successCount === tables.length ? 'success' : 'warning');
+        }
+
+        async function testDataFetch() {
+            log('📥 Testing Data Fetch...', 'info');
+            
+            const { data, error } = await supabase
+                .from('year_wise_placement')
+                .select('*')
+                .limit(3);
+            
+            if (error) {
+                log(`❌ Fetch Error: ${error.message}`, 'error');
+                logJson(error);
+            } else if (data && data.length > 0) {
+                log(`✅ Successfully fetched ${data.length} rows`, 'success');
+                logJson(data);
+            } else {
+                log('⚠️ Table exists but has no data', 'warning');
+            }
+        }
+
+        window.runTests = async function() {
+            results.innerHTML = '';
+            log('🚀 Running All Tests...', 'info');
+            
+            await testConnection();
+            await testAuth();
+            await testTables();
+            await testDataFetch();
+            
+            log('\n✅ All tests complete!', 'success');
+        };
+
+        window.testAuth = testAuth;
+        window.testTables = testTables;
+
+        // Auto-run on load
+        window.addEventListener('load', () => {
+            setTimeout(runTests, 500);
+        });
+    </script>
+</body>
+</html>
