@@ -2,11 +2,10 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers":
-    "authorization, x-client-info, apikey, content-type",
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
-function jsonResponse(body: unknown, status = 200) {
+function json(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), {
     status,
     headers: { ...corsHeaders, "Content-Type": "application/json" },
@@ -14,89 +13,85 @@ function jsonResponse(body: unknown, status = 200) {
 }
 
 Deno.serve(async (req) => {
-  if (req.method === "OPTIONS") {
-    return new Response(null, { headers: corsHeaders });
-  }
+  if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
 
   try {
-    // ── Auth: verify caller identity ──────────────────────────
-    const authHeader = req.headers.get("Authorization");
-    if (!authHeader) return jsonResponse({ error: "Unauthorized" }, 401);
-
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
-    const anonKey = Deno.env.get("SUPABASE_ANON_KEY")!;
     const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 
-    // Resolve caller from JWT
-    const anonClient = createClient(supabaseUrl, anonKey, {
+    // Verify caller is authenticated
+    const authHeader = req.headers.get("Authorization");
+    if (!authHeader) return json({ error: "Unauthorized" }, 401);
+
+    const anonKey = Deno.env.get("SUPABASE_ANON_KEY")!;
+    const userClient = createClient(supabaseUrl, anonKey, {
       global: { headers: { Authorization: authHeader } },
     });
-    const { data: { user: caller }, error: authError } = await anonClient.auth.getUser();
-    if (authError || !caller) return jsonResponse({ error: "Unauthorized" }, 401);
+    const { data: { user: caller } } = await userClient.auth.getUser();
+    if (!caller) return json({ error: "Unauthorized" }, 401);
 
-    // ── RBAC: caller must be admin ────────────────────────────
-    // Use service-role client to bypass RLS safely (no recursion)
-    const adminClient = createClient(supabaseUrl, serviceRoleKey);
+    // Use service role for all admin operations
+    const admin = createClient(supabaseUrl, serviceRoleKey, {
+      auth: { autoRefreshToken: false, persistSession: false },
+    });
 
-    const { data: roleRow } = await adminClient
+    // Verify caller is admin
+    const { data: roleRow } = await admin
       .from("user_roles")
       .select("role")
       .eq("user_id", caller.id)
       .eq("role", "admin")
       .maybeSingle();
 
-    if (!roleRow) return jsonResponse({ error: "Forbidden: admin role required" }, 403);
+    if (!roleRow) return json({ error: "Forbidden" }, 403);
 
-    // ── Parse & validate body ─────────────────────────────────
-    let body: Record<string, unknown>;
-    try {
-      body = await req.json();
-    } catch {
-      return jsonResponse({ error: "Invalid JSON body" }, 400);
-    }
+    const body = await req.json();
 
-    // ── Mode 1: { email } → { user_id, email } ───────────────
+    // Mode 1: lookup by email
     if (typeof body.email === "string") {
       const email = body.email.trim().toLowerCase();
-      if (!email) return jsonResponse({ error: "email must not be empty" }, 400);
-
-      const { data: { users }, error } = await adminClient.auth.admin.listUsers();
-      if (error) throw error;
-
-      const found = users.find((u) => u.email?.toLowerCase() === email);
-      if (!found) return jsonResponse({ error: "User not found" }, 404);
-
-      return jsonResponse({ user_id: found.id, email: found.email });
-    }
-
-    // ── Mode 2: { user_ids: uuid[] } → [{ user_id, email }] ──
-    if (Array.isArray(body.user_ids)) {
-      const ids = body.user_ids as unknown[];
-
-      // Validate each entry is a non-empty string (UUID format)
-      const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-      const invalid = ids.find((id) => typeof id !== "string" || !uuidRegex.test(id));
-      if (invalid !== undefined) {
-        return jsonResponse({ error: "user_ids must be an array of valid UUIDs" }, 400);
+      
+      // Fetch all users (paginated)
+      let allUsers: { id: string; email?: string }[] = [];
+      let page = 1;
+      while (true) {
+        const { data: { users }, error } = await admin.auth.admin.listUsers({ page, perPage: 1000 });
+        if (error) throw error;
+        allUsers = allUsers.concat(users);
+        if (users.length < 1000) break;
+        page++;
       }
 
-      const { data: { users }, error } = await adminClient.auth.admin.listUsers();
-      if (error) throw error;
+      const found = allUsers.find((u) => u.email?.toLowerCase() === email);
+      if (!found) return json({ error: "User not found" }, 404);
+      return json({ user_id: found.id, email: found.email });
+    }
 
-      const userMap = new Map(users.map((u) => [u.id, u.email ?? null]));
+    // Mode 2: lookup by user_ids array
+    if (Array.isArray(body.user_ids)) {
+      let allUsers: { id: string; email?: string }[] = [];
+      let page = 1;
+      while (true) {
+        const { data: { users }, error } = await admin.auth.admin.listUsers({ page, perPage: 1000 });
+        if (error) throw error;
+        allUsers = allUsers.concat(users);
+        if (users.length < 1000) break;
+        page++;
+      }
 
-      const result = (ids as string[]).map((uid) => ({
+      const userMap = new Map(allUsers.map((u) => [u.id, u.email ?? null]));
+      const result = (body.user_ids as string[]).map((uid) => ({
         user_id: uid,
         email: userMap.get(uid) ?? null,
       }));
-
-      return jsonResponse(result);
+      return json(result);
     }
 
-    return jsonResponse({ error: "Provide 'email' (string) or 'user_ids' (uuid[])" }, 400);
+    return json({ error: "Provide 'email' or 'user_ids'" }, 400);
 
   } catch (err) {
-    const message = err instanceof Error ? err.message : "Internal server error";
-    return jsonResponse({ error: message }, 500);
+    const message = err instanceof Error ? err.message : String(err);
+    console.error("Edge function error:", message);
+    return json({ error: message }, 500);
   }
 });

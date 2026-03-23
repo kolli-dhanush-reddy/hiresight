@@ -796,7 +796,6 @@ const UserRolesTab = () => {
   const [email, setEmail] = useState("");
   const [loading, setLoading] = useState(false);
   const [deleteId, setDeleteId] = useState<string | null>(null);
-
   const [emailMap, setEmailMap] = useState<Record<string, string>>({});
 
   const { data: roles = [] } = useQuery({
@@ -804,19 +803,22 @@ const UserRolesTab = () => {
     queryFn: async () => {
       const { data, error } = await supabase.from("user_roles").select("*");
       if (error) throw error;
-      // Resolve emails for all user IDs via edge function
+      // Try to resolve emails via edge function, but don't fail if it errors
       if (data && data.length > 0) {
-        const userIds = data.map(r => r.user_id);
-        const { data: emailData } = await supabase.functions.invoke("get-user-by-email", {
-          body: { user_ids: userIds },
-        });
-        // Response is [{ user_id, email }]
-        if (Array.isArray(emailData)) {
-          const map: Record<string, string> = {};
-          for (const entry of emailData) {
-            if (entry.user_id && entry.email) map[entry.user_id] = entry.email;
+        try {
+          const userIds = data.map(r => r.user_id);
+          const { data: emailData } = await supabase.functions.invoke("get-user-by-email", {
+            body: { user_ids: userIds },
+          });
+          if (Array.isArray(emailData)) {
+            const map: Record<string, string> = {};
+            for (const entry of emailData) {
+              if (entry.user_id && entry.email) map[entry.user_id] = entry.email;
+            }
+            setEmailMap(map);
           }
-          setEmailMap(map);
+        } catch {
+          // Email lookup failed silently — UIDs still show
         }
       }
       return data;
@@ -840,14 +842,24 @@ const UserRolesTab = () => {
     if (!email.trim()) return;
     setLoading(true);
     try {
-      // Look up user by email via edge function
-      const { data: userData, error: fnError } = await supabase.functions.invoke("get-user-by-email", {
-        body: { email: email.trim() },
-      });
-      if (fnError) throw new Error(fnError.message || "Failed to look up user");
-      if (userData?.error) throw new Error(userData.error);
+      const trimmedEmail = email.trim().toLowerCase();
 
-      const userId = userData.user_id;
+      // Try edge function first
+      let userId: string | null = null;
+      const { data: userData, error: fnError } = await supabase.functions.invoke("get-user-by-email", {
+        body: { email: trimmedEmail },
+      });
+
+      if (!fnError && userData?.user_id) {
+        userId = userData.user_id;
+      } else {
+        // Fallback: ask user to enter UID directly
+        throw new Error(
+          userData?.error === "User not found"
+            ? `No account found for "${trimmedEmail}". Make sure the user has signed up first.`
+            : `Could not look up user. Try entering the User ID directly instead of email.`
+        );
+      }
 
       // Check if already admin
       const existing = roles.find(r => r.user_id === userId && r.role === "admin");
@@ -860,6 +872,7 @@ const UserRolesTab = () => {
       const { error } = await supabase.from("user_roles").insert({ user_id: userId, role: "admin" as const });
       if (error) throw error;
 
+      setEmailMap(prev => ({ ...prev, [userId!]: trimmedEmail }));
       queryClient.invalidateQueries({ queryKey: ["user_roles"] });
       toast({ title: "Admin role granted", description: `${email} is now an admin.` });
       setEmail("");
