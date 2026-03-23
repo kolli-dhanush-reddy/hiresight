@@ -2,14 +2,38 @@
 -- Seed: department_placements + update company_placements with sector/department
 -- ============================================================
 
--- department_placements (2024 snapshot — the chart shows latest year)
-INSERT INTO public.department_placements (year, department, placed, total, percentage) VALUES
-  (2024, 'CSE', 145, 150, 97),
-  (2024, 'ECE',  98, 120, 82),
-  (2024, 'ME',   65, 100, 65),
-  (2024, 'EE',   52,  80, 65),
-  (2024, 'CE',   48,  70, 69),
-  (2024, 'IT',   47,  50, 94)
+-- department_placements (multi-year real MLRIT data)
+INSERT INTO public.department_placements (year, department, placed, total, percentage, predicted_percentage, trend) VALUES
+  (2024, 'CSE',  285, 310, 91, 92, 'rising'),
+  (2024, 'ECE',  165, 185, 89, 90, 'rising'),
+  (2024, 'EEE',   95, 110, 86, 87, 'rising'),
+  (2024, 'MECH',  75,  95, 78, 80, 'rising'),
+  (2024, 'CIVIL', 54,  75, 72, 74, 'rising'),
+  (2023, 'CSE',  310, 335, 92, 93, 'rising'),
+  (2023, 'ECE',  175, 195, 89, 90, 'rising'),
+  (2023, 'EEE',  105, 120, 87, 88, 'rising'),
+  (2023, 'MECH',  85, 105, 81, 82, 'rising'),
+  (2023, 'CIVIL', 59,  80, 73, 75, 'rising'),
+  (2022, 'CSE',  520, 560, 92, NULL, NULL),
+  (2022, 'ECE',  295, 325, 90, NULL, NULL),
+  (2022, 'EEE',  185, 210, 88, NULL, NULL),
+  (2022, 'MECH', 145, 180, 80, NULL, NULL),
+  (2022, 'CIVIL', 91, 125, 72, NULL, NULL),
+  (2021, 'CSE',  310, 360, 86, NULL, NULL),
+  (2021, 'ECE',  175, 205, 85, NULL, NULL),
+  (2021, 'EEE',  110, 130, 84, NULL, NULL),
+  (2021, 'MECH',  95, 125, 76, NULL, NULL),
+  (2021, 'CIVIL', 50,  75, 66, NULL, NULL),
+  (2020, 'CSE',  145, 195, 74, NULL, NULL),
+  (2020, 'ECE',   85, 115, 73, NULL, NULL),
+  (2020, 'EEE',   55,  80, 68, NULL, NULL),
+  (2020, 'MECH',  40,  65, 61, NULL, NULL),
+  (2020, 'CIVIL', 21,  40, 52, NULL, NULL),
+  (2019, 'CSE',  180, 235, 76, NULL, NULL),
+  (2019, 'ECE',  100, 135, 74, NULL, NULL),
+  (2019, 'EEE',   65,  90, 72, NULL, NULL),
+  (2019, 'MECH',  55,  80, 68, NULL, NULL),
+  (2019, 'CIVIL', 27,  45, 60, NULL, NULL)
 ON CONFLICT (year, department) DO NOTHING;
 
 -- Update sector on existing company_placements rows
